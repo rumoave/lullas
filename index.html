@@ -410,37 +410,56 @@ footer .lockup{color:var(--cream)}
 
   var A = document.getElementById('vidA'), Bv = document.getElementById('vidB');
   var ctl = document.getElementById('vidctl');
-  var idx = 0, cur = A, nxt = Bv, playing = true, started = false;
+  var idx = 0, cur = A, nxt = Bv, playing = true, started = false, dead = {};
 
   function load(v, src, cb){
     v.src = src;
-    v.onerror = function(){ cb(false); };
+    v.onerror = function(){ dead[src] = 1; cb(false); };
     v.oncanplay = function(){ cb(true); };
     v.load();
   }
+  function nextLive(from){
+    for (var s = 1; s <= CLIPS.length; s++){
+      var i = (from + s) % CLIPS.length;
+      if (!dead[CLIPS[i]]) return i;
+    }
+    return -1;
+  }
   function advance(){
-    idx = (idx + 1) % CLIPS.length;
-    load(nxt, CLIPS[idx], function(ok){
-      if(!ok){ if(CLIPS.length > 1){ advance(); } return; }
+    var ni = nextLive(idx);
+    if (ni === -1) return;
+    if (ni === idx){                 // only one live clip: restart it, no fade
+      cur.currentTime = 0;
+      cur.play().catch(function(){});
+      return;
+    }
+    load(nxt, CLIPS[ni], function(ok){
+      if(!ok){ advance(); return; }
+      idx = ni;
       nxt.currentTime = 0;
       nxt.play().then(function(){
+        // fade the new clip in fully BEFORE releasing the old one,
+        // so the poster art can never flash through mid-transition
         nxt.classList.add('on');
-        cur.classList.remove('on');
-        var t = cur; cur = nxt; nxt = t;
+        var old = cur; cur = nxt; nxt = old;
+        setTimeout(function(){ old.classList.remove('on'); }, 1100);
       }).catch(function(){});
     });
   }
-  // each clip plays through once, then crossfades to the next
   [A, Bv].forEach(function(v){
     v.addEventListener('ended', function(){ if(v === cur && playing){ advance(); } });
   });
 
-  load(A, CLIPS[0], function(ok){
-    if(!ok) return;               // no clips yet: poster illustration stays
-    started = true;
-    ctl.hidden = false;
-    A.play().then(function(){ A.classList.add('on'); }).catch(function(){});
-  });
+  function boot(i){
+    if (i >= CLIPS.length) return;  // no clips at all: poster stays
+    load(A, CLIPS[i], function(ok){
+      if(!ok){ boot(i + 1); return; }
+      idx = i; started = true;
+      ctl.hidden = false;
+      A.play().then(function(){ A.classList.add('on'); }).catch(function(){});
+    });
+  }
+  boot(0);
 
   // hide ground section if the video file is not deployed yet
   var gv = document.getElementById('groundvid');
